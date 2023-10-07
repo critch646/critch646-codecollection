@@ -3,3 +3,5 @@ __pycache__
 output.xml
 log.html
 report.html
+codebundles/git-history-inspection/debug_commits.json
+codebundles/git-history-inspection/jsons/*
