@@ -37,21 +37,21 @@ function git_hist_inspec_help(){
 
 function extract_repo_info(){
     local url_type="$1"
-
+    
     # Using local variables within the function
     local owner=""
     local repo=""
-
+    
     if [[ $url_type -eq $GITHUB ]]; then
         # GitHub
         owner=$(echo "$URL" | sed -n 's/.*github.com\/\([^\/]*\)\/\([^\/]*\).*/\1/p')
         repo=$(echo "$URL" | sed -n 's/.*github.com\/\([^\/]*\)\/\([^\/]*\).*/\2/p')
-    elif [[ $url_type -eq $GITLAB ]]; then
+        elif [[ $url_type -eq $GITLAB ]]; then
         # GitLab
         owner=$(echo "$URL" | sed -n 's/.*gitlab.com\/\([^\/]*\)\/\([^\/]*\).*/\1/p')
         repo=$(echo "$URL" | sed -n 's/.*gitlab.com\/\([^\/]*\)\/\([^\/]*\).*/\2/p')
     fi
-
+    
     # Assign to global variables
     REPO_OWNER="$owner"
     REPO_NAME="$repo"
@@ -60,7 +60,7 @@ function extract_repo_info(){
 function check_valid_url(){
     if [[ "$1" =~ ^(http|https)://github.com/.*$ ]]; then
         return $GITHUB
-    elif [[ "$1" =~ ^(http|https)://gitlab.com/.*$ ]]; then
+        elif [[ "$1" =~ ^(http|https)://gitlab.com/.*$ ]]; then
         return $GITLAB
     else
         echo "Invalid URL"
@@ -106,14 +106,14 @@ function check_gitlab_token() {
 function print_commits_summary() {
     local commits_data="$1"
     local url_type="$2"
-
+    
     # echo Raw Commits Data: $commits_data"
-
+    
     echo "Summary of recent commits:"
     if [[ $url_type -eq $GITHUB ]]; then
         # GitHub
         echo "$commits_data" | jq -r '.[0:5] | .[] | "\(.sha[0:8]) - \(.commit.committer.date) - \(.commit.message)"'
-    elif [[ $status -eq $GITLAB ]]; then
+        elif [[ $status -eq $GITLAB ]]; then
         # GitLab
         echo "$commits_data" | jq -r '.[0:5] | .[] | "\(.short_id) - \(.committed_date) - \(.title)"'
     fi
@@ -131,6 +131,15 @@ function fetch_github_commits() {
         exit 1
     fi
     
+    echo "$response"
+}
+
+function fetch_github_commit_files() {
+    check_github_token
+    local commit_sha="$1"
+    local response
+    
+    response=$(curl -s -H "Authorization: token $GITHUB_TOKEN" "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/commits/$commit_sha")
     echo "$response"
 }
 
@@ -195,49 +204,49 @@ function filter_commits() {
     local url_type="$3"
     local duration_seconds="$4"
     local matched_commits=0
-
+    
     local duration_ago=$(date -d "@$(($(date +%s) - $duration_seconds))" --iso-8601=seconds | sed 's/+.*//')
     
     local readable_duration=$(get_readable_duration "$duration_seconds")
-
+    
     echo -e "\nCommits matching the regex \"$regex\" within the duration of $readable_duration:\n"
-
+    
     if [ "$commits_data" == "null" ] || [ -z "$commits_data" ]; then
         echo "No commits data received."
         return
     fi
-
+    
     if [[ $url_type -eq $GITHUB ]]; then
         for row in $(echo "${commits_data}" | jq -r '.[] | @base64'); do
             _jq() {
                 echo ${row} | base64 --decode | jq -r ${1}
             }
-
+            
             local commit_msg=$(_jq '.commit.message')
             local commit_date=$(_jq '.commit.committer.date')
             local commit_sha=$(_jq '.sha')
-
+            
             if [[ $commit_msg =~ $regex ]] && [[ $commit_date > $duration_ago ]]; then
                 echo "${commit_sha:0:8} - $commit_date - $commit_msg (File: $regex)"
                 matched_commits=$((matched_commits+1))
             else
-                local files=$(fetch_github_commits "$commit_sha")
+                local files=$(fetch_github_commit_files "$commit_sha")
                 if [[ $files =~ $regex ]] && [[ $commit_date > $duration_ago ]]; then
                     echo "${commit_sha:0:8} - $commit_date - $commit_msg (File: $regex)"
                     matched_commits=$((matched_commits+1))
                 fi
             fi
         done
-    elif [[ $url_type -eq $GITLAB ]]; then
+        elif [[ $url_type -eq $GITLAB ]]; then
         for row in $(echo "${commits_data}" | jq -r '.[] | @base64'); do
             _jq() {
                 echo ${row} | base64 --decode | jq -r ${1}
             }
-
+            
             local commit_msg=$(_jq '.title')
             local commit_date=$(_jq '.committed_date')
             local commit_sha=$(_jq '.id')
-
+            
             if [[ $commit_msg =~ $regex ]] && [[ $commit_date > $duration_ago ]]; then
                 echo "$commit_sha - $commit_date - $commit_msg (File: $regex)"
                 matched_commits=$((matched_commits+1))
@@ -250,27 +259,27 @@ function filter_commits() {
             fi
         done
     fi
-
+    
     echo -e "\nTotal commits matched: $matched_commits within the duration of $readable_duration for file $regex"
 }
 
 
 
 function main (){
-
+    
     # Check if help
     if [[ "$1" == "help" ]]; then
         git_hist_inspec_help
         exit 0
     fi
-
+    
     # Check if arguments are provided
     if [[ "$#" -lt 1 ]]; then
         echo "No URL provided"
         git_hist_inspec_help
         exit 1
     fi
-
+    
     # Validate URL
     URL="$1"
     check_valid_url "$URL"
@@ -278,42 +287,42 @@ function main (){
     if [[ $repo_type -eq $GITHUB ]]; then
         echo "GitHub URL detected"
         check_github_token
-    elif [[ $repo_type -eq $GITLAB ]]; then
+        elif [[ $repo_type -eq $GITLAB ]]; then
         echo "GitLab URL detected"
         check_gitlab_token
     fi
-
+    
     # Check for valid regex
     if [[ "$#" -gt 1 ]]; then
         regex="$2"
     fi
-
+    
     # Extract repo name and owner
     extract_repo_info "$repo_type"
-
+    
     # Check for valid duration (if provided)
     if [[ "$#" -gt 2 ]]; then
         duration_seconds=$(get_duration_in_seconds "$3")
     else
         duration_seconds=$(get_duration_in_seconds "1d")  # default to 1 day if not provided
     fi
-
+    
     # Get commits
     if [[ $repo_type -eq $GITHUB ]]; then
         COMMITS=$(fetch_github_commits)
-    elif [[ $repo_type -eq $GITLAB ]]; then
+        elif [[ $repo_type -eq $GITLAB ]]; then
         COMMITS=$(fetch_gitlab_commits)
     fi
-
-
+    
+    
     # Filter commits based on regex (only if regex provided)
     if [[ -n "$regex" ]]; then
         filter_commits "$COMMITS" "$regex" "$repo_type" "$duration_seconds"
     fi
-
+    
     # Print commits summary
     print_commits_summary "$COMMITS" "$repo_type"
-
+    
 }
 main "$@"
 
