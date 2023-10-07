@@ -143,13 +143,11 @@ function print_commits_summary() {
     local commits_data="$1"
     local url_type="$2"
     
-    # echo Raw Commits Data: $commits_data"
-    
     echo "Summary of recent commits:"
     if [[ $url_type -eq $GITHUB ]]; then
         # GitHub
         echo "$commits_data" | jq -r '.[0:5] | .[] | "\(.sha[0:8]) - \(.commit.committer.date) - \(.commit.message)"'
-        elif [[ $status -eq $GITLAB ]]; then
+        elif [[ $url_type -eq $GITLAB ]]; then
         # GitLab
         echo "$commits_data" | jq -r '.[0:5] | .[] | "\(.short_id) - \(.committed_date) - \(.title)"'
     fi
@@ -185,9 +183,41 @@ function fetch_gitlab_commits() {
     check_gitlab_token
     local response
     response=$(curl -s --header "PRIVATE-TOKEN: $GITLAB_TOKEN" "https://gitlab.com/api/v4/projects/$REPO_OWNER%2F$REPO_NAME/repository/commits")
-    check_gitlab_rate_limit "$response"
+    # check_gitlab_rate_limit "$response"
+    
+    # Save JSON
+    # echo "$response" > jsons/gitlab_commits.json
+    
     echo "$response"
 }
+
+function fetch_gitlab_commit_files(){
+    check_gitlab_token
+    local commit_sha="$1"
+    local response=$(curl -s --header "PRIVATE-TOKEN: $GITLAB_TOKEN" "https://gitlab.com/api/v4/projects/$REPO_OWNER%2F$REPO_NAME/repository/commits/$commit_sha/diff")
+    
+    # Check if response is valid JSON
+    if ! is_valid_json "$response"; then
+        echo "Received invalid JSON response from GitLab."
+        exit 1
+    fi
+    
+    echo "$response"
+}
+
+
+function get_file_url() {
+    local repo_type="$1"
+    local commit_sha="$2"
+    local file_path="$3"
+    
+    if [[ $repo_type -eq $GITHUB ]]; then
+        echo "https://github.com/$REPO_OWNER/$REPO_NAME/blob/$commit_sha/$file_path"
+        elif [[ $repo_type -eq $GITLAB ]]; then
+        echo "https://gitlab.com/$REPO_OWNER/$REPO_NAME/-/blob/$commit_sha/$file_path"
+    fi
+}
+
 
 function get_duration_in_seconds() {
     local duration="$1"
@@ -265,12 +295,12 @@ function filter_commits() {
             local commit_sha=$(_jq '.sha')
             
             if [[ $commit_msg =~ $regex ]] && [[ $commit_date > $duration_ago ]]; then
-                echo "${commit_sha:0:8} - $commit_date - $commit_msg (File: $regex)"
+                echo "${commit_sha:0:8} - $commit_date - $commit_msg"
                 matched_commits=$((matched_commits+1))
             else
                 local files=$(fetch_github_commit_files "$commit_sha")
                 if [[ $files =~ $regex ]] && [[ $commit_date > $duration_ago ]]; then
-                    echo "${commit_sha:0:8} - $commit_date - $commit_msg (File: $regex)"
+                    echo "${commit_sha:0:8} - $commit_date - $commit_msg URL: $(get_file_url $GITHUB "$commit_sha" "$regex")"
                     matched_commits=$((matched_commits+1))
                 fi
             fi
@@ -286,14 +316,16 @@ function filter_commits() {
             local commit_sha=$(_jq '.id')
             
             if [[ $commit_msg =~ $regex ]] && [[ $commit_date > $duration_ago ]]; then
-                echo "$commit_sha - $commit_date - $commit_msg (File: $regex)"
+                echo "${commit_sha:0:8} - $commit_date - $commit_msg"
                 matched_commits=$((matched_commits+1))
             else
-                local files=$(fetch_gitlab_commits "$commit_sha")
+                local files=$(fetch_gitlab_commit_files "$commit_sha")
                 if [[ $files =~ $regex ]] && [[ $commit_date > $duration_ago ]]; then
-                    echo "$commit_sha - $commit_date - $commit_msg (File: $regex)"
+                    local file_url=$(get_file_url $GITLAB "$commit_sha" "$regex")
+                    echo "${commit_sha:0:8} - $commit_date - $commit_msg URL: $file_url"
                     matched_commits=$((matched_commits+1))
                 fi
+                
             fi
         done
     fi
