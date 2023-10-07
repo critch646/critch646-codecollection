@@ -72,13 +72,49 @@ function is_valid_json() {
     echo "$1" | jq . >/dev/null 2>&1
 }
 
-function check_github_rate_limit() {
+function check_github_commits_rate_limit() {
     local response="$1"
-    if echo "$response" | jq -e 'if type=="object" then .message | contains("API rate limit exceeded") else false end' >/dev/null; then
-        echo "Rate limit exceeded for GitHub. Please try again later or authenticate your requests."
+    
+    # Check if null
+    if [ "$response" == "null" ]; then
+        echo "Received null response from GitHub. Please check if the repository exists."
+        exit 1
+    fi
+    
+    # Check if valid JSON
+    if ! is_valid_json "$response"; then
+        echo "Received invalid JSON response from GitHub."
+        exit 1
+    fi
+    
+    if echo "$response" | jq -e '.[] | select(.message != null) | .message | contains("API rate limit exceeded")' >/dev/null; then
+        echo "Rate limit exceeded for GitHub commits. Please try again later or authenticate your requests."
         exit 1
     fi
 }
+
+function check_github_files_rate_limit() {
+    local response="$1"
+    
+    # Check if null
+    if [ "$response" == "null" ]; then
+        echo "No files data received."
+        exit 1
+    fi
+    
+    # Check if valid JSON
+    if ! is_valid_json "$response"; then
+        echo "Received invalid JSON response from GitHub for files."
+        exit 1
+    fi
+    
+    # Check for rate limit exceeded in object format
+    if echo "$response" | jq -e 'select(.message != null) | .message | contains("API rate limit exceeded")' >/dev/null; then
+        echo "Rate limit exceeded for GitHub files. Please try again later or authenticate your requests."
+        exit 1
+    fi
+}
+
 
 function check_gitlab_rate_limit() {
     local response="$1"
@@ -123,7 +159,7 @@ function fetch_github_commits() {
     check_github_token
     local response
     response=$(curl -s -H "Authorization: token $GITHUB_TOKEN" "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/commits")
-    check_github_rate_limit "$response"
+    check_github_commits_rate_limit "$response"
     
     # Validate JSON
     if ! is_valid_json "$response"; then
@@ -140,6 +176,8 @@ function fetch_github_commit_files() {
     local response
     
     response=$(curl -s -H "Authorization: token $GITHUB_TOKEN" "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/commits/$commit_sha")
+    check_github_files_rate_limit "$response"
+    
     echo "$response"
 }
 
