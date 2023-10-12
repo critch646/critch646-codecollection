@@ -5,10 +5,13 @@
 # - A list of commits/timestamps/short-shas who's filenames or commit messages match a regex (eg: so it can be configured to pull info for everything related to a backend microservice) and provide some stats such as: X backend files changed in last 6 hours
 # - If possible, reconstruct the git URLs for the detected files (gitlab or github) and provide those URLs in the raised issues if the regex finds matches
 
-REPO_OWNER=""
-REPO_NAME=""
-GITHUB=0
-GITLAB=1
+declare -g REPO_OWNER=""
+declare -g GITHUB=0
+declare -g REPO_NAME=""
+declare -g GITLAB=1
+declare -g COMMITS=""
+declare -g URL=""
+declare -g SEARCH=0
 
 function git_hist_inspec_help(){
     echo "
@@ -37,24 +40,18 @@ function git_hist_inspec_help(){
 
 function extract_repo_info(){
     local url_type="$1"
-    
-    # Using local variables within the function
     local owner=""
     local repo=""
     
     if [[ $url_type -eq $GITHUB ]]; then
         # GitHub
-        owner=$(echo "$URL" | sed -n 's/.*github.com\/\([^\/]*\)\/\([^\/]*\).*/\1/p')
-        repo=$(echo "$URL" | sed -n 's/.*github.com\/\([^\/]*\)\/\([^\/]*\).*/\2/p')
+        REPO_OWNER=$(echo "$URL" | sed -n 's/.*github.com\/\([^\/]*\)\/\([^\/]*\).*/\1/p')
+        REPO_NAME=$(echo "$URL" | sed -n 's/.*github.com\/\([^\/]*\)\/\([^\/]*\).*/\2/p')
         elif [[ $url_type -eq $GITLAB ]]; then
         # GitLab
-        owner=$(echo "$URL" | sed -n 's/.*gitlab.com\/\([^\/]*\)\/\([^\/]*\).*/\1/p')
-        repo=$(echo "$URL" | sed -n 's/.*gitlab.com\/\([^\/]*\)\/\([^\/]*\).*/\2/p')
+        REPO_OWNER=$(echo "$URL" | sed -n 's/.*gitlab.com\/\([^\/]*\)\/\([^\/]*\).*/\1/p')
+        REPO_NAME=$(echo "$URL" | sed -n 's/.*gitlab.com\/\([^\/]*\)\/\([^\/]*\).*/\2/p')
     fi
-    
-    # Assign to global variables
-    REPO_OWNER="$owner"
-    REPO_NAME="$repo"
 }
 
 function check_valid_url(){
@@ -75,19 +72,7 @@ function is_valid_json() {
 function check_github_commits_rate_limit() {
     local response="$1"
     
-    # Check if null
-    if [ "$response" == "null" ]; then
-        echo "Received null response from GitHub. Please check if the repository exists."
-        exit 1
-    fi
-    
-    # Check if valid JSON
-    if ! is_valid_json "$response"; then
-        echo "Received invalid JSON response from GitHub."
-        exit 1
-    fi
-    
-    if echo "$response" | jq -e '.[] | select(.message != null) | .message | contains("API rate limit exceeded")' >/dev/null; then
+    if echo "$response" | jq -e '.[] | select(.message != null) | .message | contains("Rate limit exceeded")' >/dev/null; then
         echo "Rate limit exceeded for GitHub commits. Please try again later or authenticate your requests."
         exit 1
     fi
@@ -130,6 +115,8 @@ function check_github_token() {
         echo "GITHUB_TOKEN environment variable not set. Please set it to proceed."
         exit 1
     fi
+    echo "GITHUB_TOKEN detected"
+    
 }
 
 function check_gitlab_token() {
@@ -140,36 +127,81 @@ function check_gitlab_token() {
 }
 
 function print_commits_summary() {
-    local commits_data="$1"
-    local url_type="$2"
+    local url_type="$1"
     
     echo "Summary of recent commits:"
     if [[ $url_type -eq $GITHUB ]]; then
         # GitHub
-        echo "$commits_data" | jq -r '.[0:5] | .[] | "\(.sha[0:8]) - \(.commit.committer.date) - \(.commit.message)"'
+        # Check if rate limit exceeded
+        check_github_commits_rate_limit "$COMMITS"
+        echo "$COMMITS" | jq -r '.[] | "\(.sha[0:8]) - \(.commit.committer.date) - \(.commit.message)"'
         elif [[ $url_type -eq $GITLAB ]]; then
         # GitLab
-        echo "$commits_data" | jq -r '.[0:5] | .[] | "\(.short_id) - \(.committed_date) - \(.title)"'
+        echo "$COMMITS" | jq -r '.[] | "\(.short_id) - \(.committed_date) - \(.title)"'
     fi
+}
+
+function fetch_recent_github_commits() {
+    local full_response=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
+    "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/commits")
+    
+    check_github_commits_rate_limit "$full_response"
+    
+    COMMITS="$full_response"
 }
 
 function fetch_github_commits() {
-    check_github_token
-    local response
-    response=$(curl -s -H "Authorization: token $GITHUB_TOKEN" "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/commits")
-    check_github_commits_rate_limit "$response"
     
-    # Validate JSON
-    if ! is_valid_json "$response"; then
-        echo "Received invalid JSON response from GitHub."
-        exit 1
-    fi
+    local all_commits=""
+    local page=1
+    local per_page=100
+    local limit=30
     
-    echo "$response"
+    local current_time_epoch=$(date +%s)
+    local duration_ago_epoch=$(($current_time_epoch - $duration_seconds))
+    
+    while : ; do
+        
+        local full_response=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
+        -i "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/commits?page=$page&per_page=$per_page")
+        
+        # Extract Link header
+        local link_header=$(echo "$full_response" | grep -i '^link:' | sed 's/^link:/LINK:/I')
+        
+        # Separate headers from JSON body
+        local response=$(echo "$full_response" | awk '/^\[/{p=1} p')
+        
+        # Check if rate limited
+        check_github_commits_rate_limit "$response"
+        
+        # Check if the last commit in this page is older than our duration
+        local last_commit_date=$(echo "$response" | jq -r '.[-1].commit.committer.date')
+        local last_commit_epoch=$(date --date="$last_commit_date" +%s)
+        
+        all_commits+="$response"
+        
+        if [[ $last_commit_epoch -lt $duration_ago_epoch ]]; then
+            echo "All commits within the duration fetched."
+            break
+        fi
+        
+        # Check the Link header for the absence of "next" to determine end of pages
+        if [[ ! $link_header == *rel=\"next\"* ]]; then
+            echo "No more pages to fetch. Reached the end of commits."
+            break
+        fi
+        
+        page=$((page + 1))
+    done
+    
+    COMMITS="$all_commits"
 }
 
+
+
+
+
 function fetch_github_commit_files() {
-    check_github_token
     local commit_sha="$1"
     local response
     
@@ -180,15 +212,14 @@ function fetch_github_commit_files() {
 }
 
 function fetch_gitlab_commits() {
-    check_gitlab_token
     local response
     response=$(curl -s --header "PRIVATE-TOKEN: $GITLAB_TOKEN" "https://gitlab.com/api/v4/projects/$REPO_OWNER%2F$REPO_NAME/repository/commits")
-    # check_gitlab_rate_limit "$response"
+    check_gitlab_rate_limit "$response"
     
     # Save JSON
     # echo "$response" > jsons/gitlab_commits.json
     
-    echo "$response"
+    COMMITS="$response"
 }
 
 function fetch_gitlab_commit_files(){
@@ -267,10 +298,9 @@ function iso_to_epoch() {
 }
 
 function filter_commits() {
-    local commits_data="$1"
-    local regex="$2"
-    local url_type="$3"
-    local duration_seconds="$4"
+    local regex="$1"
+    local url_type="$2"
+    local duration_seconds="$3"
     local matched_commits=0
     
     local duration_ago=$(date -d "@$(($(date +%s) - $duration_seconds))" --iso-8601=seconds | sed 's/+.*//')
@@ -279,13 +309,13 @@ function filter_commits() {
     
     echo -e "\nCommits matching the regex \"$regex\" within the duration of $readable_duration:\n"
     
-    if [ "$commits_data" == "null" ] || [ -z "$commits_data" ]; then
+    if [ "$COMMITS" == "null" ] || [ -z "$COMMITS" ]; then
         echo "No commits data received."
         return
     fi
     
     if [[ $url_type -eq $GITHUB ]]; then
-        for row in $(echo "${commits_data}" | jq -r '.[] | @base64'); do
+        for row in $(echo "${COMMITS}" | jq -r '.[] | @base64'); do
             _jq() {
                 echo ${row} | base64 --decode | jq -r ${1}
             }
@@ -306,7 +336,7 @@ function filter_commits() {
             fi
         done
         elif [[ $url_type -eq $GITLAB ]]; then
-        for row in $(echo "${commits_data}" | jq -r '.[] | @base64'); do
+        for row in $(echo "${COMMITS}" | jq -r '.[] | @base64'); do
             _jq() {
                 echo ${row} | base64 --decode | jq -r ${1}
             }
@@ -373,25 +403,41 @@ function main (){
     # Check for valid duration (if provided)
     if [[ "$#" -gt 2 ]]; then
         duration_seconds=$(get_duration_in_seconds "$3")
+        SEARCH=1
     else
-        duration_seconds=$(get_duration_in_seconds "1d")  # default to 1 day if not provided
+        duration_seconds=$(get_duration_in_seconds "1d")
     fi
     
     # Get commits
     if [[ $repo_type -eq $GITHUB ]]; then
-        COMMITS=$(fetch_github_commits)
+        
+        if [[ $SEARCH -eq 1 ]]; then
+            fetch_github_commits
+            
+        else
+            fetch_recent_github_commits
+        fi
+        
         elif [[ $repo_type -eq $GITLAB ]]; then
-        COMMITS=$(fetch_gitlab_commits)
+        
+        if [[ $SEARCH -eq 1 ]]; then
+            fetch_gitlab_commits
+            
+        else
+            fetch_recent_gitlab_commits
+        fi
+        
     fi
     
     
     # Filter commits based on regex (only if regex provided)
     if [[ -n "$regex" ]]; then
-        filter_commits "$COMMITS" "$regex" "$repo_type" "$duration_seconds"
+        filter_commits "$regex" "$repo_type" "$duration_seconds"
+        exit 0
     fi
     
     # Print commits summary
-    print_commits_summary "$COMMITS" "$repo_type"
+    print_commits_summary "$repo_type"
     
 }
 main "$@"
