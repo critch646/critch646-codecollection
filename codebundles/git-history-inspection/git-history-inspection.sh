@@ -11,7 +11,7 @@ declare -g REPO_NAME=""
 declare -g GITLAB=1
 declare -g COMMITS=""
 declare -g URL=""
-declare -g SEARCH=0
+declare -g SEARCH_FILES=0
 
 function git_hist_inspec_help(){
     echo "
@@ -103,20 +103,19 @@ function check_github_files_rate_limit() {
 
 function check_gitlab_rate_limit() {
     local response="$1"
-    # Assuming a "message" field in response, this might need adjustment
-    if echo "$response" | jq -e '.message | contains("Rate limit exceeded")' >/dev/null; then
+    # Check every object in the array for "message" field
+    if echo "$response" | jq -e '.[] | select(.message? | contains("Rate limit exceeded"))' >/dev/null; then
         echo "Rate limit exceeded for GitLab. Please try again later or authenticate your requests."
         exit 1
     fi
 }
+
 
 function check_github_token() {
     if [[ -z "$GITHUB_TOKEN" ]]; then
         echo "GITHUB_TOKEN environment variable not set. Please set it to proceed."
         exit 1
     fi
-    echo "GITHUB_TOKEN detected"
-    
 }
 
 function check_gitlab_token() {
@@ -199,8 +198,6 @@ function fetch_github_commits() {
 
 
 
-
-
 function fetch_github_commit_files() {
     local commit_sha="$1"
     local response
@@ -211,16 +208,64 @@ function fetch_github_commit_files() {
     echo "$response"
 }
 
-function fetch_gitlab_commits() {
+function fetch_recent_gitlab_commits(){
     local response
     response=$(curl -s --header "PRIVATE-TOKEN: $GITLAB_TOKEN" "https://gitlab.com/api/v4/projects/$REPO_OWNER%2F$REPO_NAME/repository/commits")
     check_gitlab_rate_limit "$response"
     
-    # Save JSON
-    # echo "$response" > jsons/gitlab_commits.json
-    
     COMMITS="$response"
 }
+
+function fetch_gitlab_commits() {
+    
+    local all_commits=""
+    local page=1
+    local per_page=100
+    local current_time_epoch=$(date +%s)
+    local duration_ago_epoch=$(($current_time_epoch - $duration_seconds))
+    
+    while : ; do
+        
+        local full_response=$(curl -s -H "PRIVATE-TOKEN: $GITLAB_TOKEN" \
+        -i "https://gitlab.com/api/v4/projects/$REPO_OWNER%2F$REPO_NAME/repository/commits?page=$page&per_page=$per_page")
+        
+        # Extract next page from header
+        local next_page=$(echo "$full_response" | grep -i '^x-next-page:' | sed -n 's/^x-next-page: //p')
+        
+        # Separate headers from JSON body
+        local response=$(echo "$full_response" | awk '/^\[/{p=1} p')
+        
+        # Check if rate limited
+        check_gitlab_rate_limit "$response"
+        
+        # Check if the last commit in this page is older than our duration
+        local last_commit_date=$(echo "$response" | jq -r 'if .[-1] then .[-1].committed_date else null end')
+        
+        if [ "$last_commit_date" != "null" ]; then
+            local last_commit_epoch=$(date --date="$last_commit_date" +%s)
+        else
+            last_commit_epoch=0
+        fi
+        
+        all_commits+="$response"
+        
+        if [[ $last_commit_epoch -lt $duration_ago_epoch ]]; then
+            echo "All commits within the duration fetched."
+            break
+        fi
+        
+        # Check the absence of "x-next-page" to determine end of pages
+        if [[ -z "$next_page" ]]; then
+            echo "No more pages to fetch. Reached the end of commits."
+            break
+        fi
+        
+        page=$((page + 1))
+    done
+    
+    COMMITS="$all_commits"
+}
+
 
 function fetch_gitlab_commit_files(){
     check_gitlab_token
@@ -403,7 +448,7 @@ function main (){
     # Check for valid duration (if provided)
     if [[ "$#" -gt 2 ]]; then
         duration_seconds=$(get_duration_in_seconds "$3")
-        SEARCH=1
+        SEARCH_FILES=1
     else
         duration_seconds=$(get_duration_in_seconds "1d")
     fi
@@ -411,7 +456,7 @@ function main (){
     # Get commits
     if [[ $repo_type -eq $GITHUB ]]; then
         
-        if [[ $SEARCH -eq 1 ]]; then
+        if [[ $SEARCH_FILES -eq 1 ]]; then
             fetch_github_commits
             
         else
@@ -420,7 +465,7 @@ function main (){
         
         elif [[ $repo_type -eq $GITLAB ]]; then
         
-        if [[ $SEARCH -eq 1 ]]; then
+        if [[ $SEARCH_FILES -eq 1 ]]; then
             fetch_gitlab_commits
             
         else
