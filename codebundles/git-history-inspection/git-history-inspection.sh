@@ -26,7 +26,7 @@ function git_hist_inspec_help(){
     - Combine days, hours, and minutes (e.g. '2d3h15m' for 2 days, 3 hours, and 15 minutes)
 
     Authentication:
-    To avoid rate limits and access private repositories, you can set authentication tokens.
+    To avoid rate limits and access private repositories, you need to set authentication tokens.
     For GitHub: Export GITHUB_TOKEN environment variable.
     For GitLab: Export GITLAB_TOKEN environment variable.
 
