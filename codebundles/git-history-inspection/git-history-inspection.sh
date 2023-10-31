@@ -4,6 +4,7 @@
 # - A informative formatted summary of recent commit messages, their short-shas, and timestamps from GitHub or GitLab URLs
 # - A list of commits/timestamps/short-shas who's filenames or commit messages match a regex (eg: so it can be configured to pull info for everything related to a backend microservice) and provide some stats such as: X backend files changed in last 6 hours
 # - If possible, reconstruct the git URLs for the detected files (gitlab or github) and provide those URLs in the raised issues if the regex finds matches
+# @author: Zeke Critchlow
 
 declare -g REPO_OWNER=""
 declare -g GITHUB=0
@@ -13,6 +14,10 @@ declare -g COMMITS=""
 declare -g URL=""
 declare -g SEARCH_FILES=0
 
+
+# Help function
+# Usage: git-hist-inspec help
+# Prints help message
 function git_hist_inspec_help(){
     echo "
     git-hist-inspec help
@@ -37,7 +42,9 @@ function git_hist_inspec_help(){
 }
 
 
-
+# Extracts repo owner and name from URL
+# Usage: extract_repo_info <url_type>
+# url_type: 0 for GitHub, 1 for GitLab
 function extract_repo_info(){
     local url_type="$1"
     local owner=""
@@ -54,6 +61,9 @@ function extract_repo_info(){
     fi
 }
 
+# Checks if URL is valid
+# Usage: check_valid_url <url>
+# Returns 0 for GitHub, 1 for GitLab
 function check_valid_url(){
     if [[ "$1" =~ ^(http|https)://github.com/.*$ ]]; then
         return $GITHUB
@@ -65,10 +75,18 @@ function check_valid_url(){
     fi
 }
 
+
+# Checks if string is valid JSON
+# Usage: is_valid_json <string>
+# Returns 0 if valid, 1 if invalid
 function is_valid_json() {
     echo "$1" | jq . >/dev/null 2>&1
 }
 
+
+# Checks if GitHub commits rate limit exceeded
+# Usage: check_github_commits_rate_limit <response>
+# Exits if rate limit exceeded
 function check_github_commits_rate_limit() {
     local response="$1"
     
@@ -78,6 +96,10 @@ function check_github_commits_rate_limit() {
     fi
 }
 
+
+# Checks if GitHub files rate limit exceeded
+# Usage: check_github_files_rate_limit <response>
+# Exits if rate limit exceeded
 function check_github_files_rate_limit() {
     local response="$1"
     
@@ -101,6 +123,10 @@ function check_github_files_rate_limit() {
 }
 
 
+
+# Checks if GitLab rate limit exceeded
+# Usage: check_gitlab_rate_limit <response>
+# Exits if rate limit exceeded
 function check_gitlab_rate_limit() {
     local response="$1"
     # Check every object in the array for "message" field
@@ -111,6 +137,9 @@ function check_gitlab_rate_limit() {
 }
 
 
+# Checks if GitHub token is set
+# Usage: check_github_token
+# Exits if not set
 function check_github_token() {
     if [[ -z "$GITHUB_TOKEN" ]]; then
         echo "GITHUB_TOKEN environment variable not set. Please set it to proceed."
@@ -118,6 +147,10 @@ function check_github_token() {
     fi
 }
 
+
+# Checks if GitLab token is set
+# Usage: check_gitlab_token
+# Exits if not set
 function check_gitlab_token() {
     if [[ -z "$GITLAB_TOKEN" ]]; then
         echo "GITLAB_TOKEN environment variable not set. Please set it to proceed."
@@ -125,6 +158,10 @@ function check_gitlab_token() {
     fi
 }
 
+
+# Prints commits summary
+# Usage: print_commits_summary <url_type>
+# url_type: 0 for GitHub, 1 for GitLab
 function print_commits_summary() {
     local url_type="$1"
     
@@ -140,6 +177,10 @@ function print_commits_summary() {
     fi
 }
 
+
+# Fetches recent commits from GitHub
+# Usage: fetch_recent_github_commits
+# Sets COMMITS variable
 function fetch_recent_github_commits() {
     local full_response=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
     "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/commits")
@@ -149,6 +190,10 @@ function fetch_recent_github_commits() {
     COMMITS="$full_response"
 }
 
+
+# Fetches recent commits from GitLab
+# Usage: fetch_recent_gitlab_commits
+# Sets COMMITS variable
 function fetch_github_commits() {
     
     local all_commits=""
@@ -197,7 +242,9 @@ function fetch_github_commits() {
 }
 
 
-
+# Fetches recent commits from GitLab
+# Usage: fetch_recent_gitlab_commits
+# Sets COMMITS variable
 function fetch_github_commit_files() {
     local commit_sha="$1"
     local response
@@ -208,6 +255,10 @@ function fetch_github_commit_files() {
     echo "$response"
 }
 
+
+# Fetches recent commits from GitLab
+# Usage: fetch_recent_gitlab_commits
+# Sets COMMITS variable
 function fetch_recent_gitlab_commits(){
     local response
     response=$(curl -s --header "PRIVATE-TOKEN: $GITLAB_TOKEN" "https://gitlab.com/api/v4/projects/$REPO_OWNER%2F$REPO_NAME/repository/commits")
@@ -216,6 +267,10 @@ function fetch_recent_gitlab_commits(){
     COMMITS="$response"
 }
 
+
+# Fetches recent commits from GitLab
+# Usage: fetch_recent_gitlab_commits
+# Sets COMMITS variable
 function fetch_gitlab_commits() {
     
     local all_commits=""
@@ -267,6 +322,9 @@ function fetch_gitlab_commits() {
 }
 
 
+# Fetches recent commits from GitLab
+# Usage: fetch_recent_gitlab_commits
+# Sets COMMITS variable
 function fetch_gitlab_commit_files(){
     check_gitlab_token
     local commit_sha="$1"
@@ -282,6 +340,9 @@ function fetch_gitlab_commit_files(){
 }
 
 
+# Fetches recent commits from GitLab
+# Usage: fetch_recent_gitlab_commits
+# Sets COMMITS variable
 function get_file_url() {
     local repo_type="$1"
     local commit_sha="$2"
@@ -295,6 +356,10 @@ function get_file_url() {
 }
 
 
+# Converts duration to seconds
+# Usage: get_duration_in_seconds <duration>
+# duration: e.g. 3d, 6h, 15m, 2d3h15m
+# Returns duration in seconds
 function get_duration_in_seconds() {
     local duration="$1"
     local total_seconds=0
@@ -321,6 +386,11 @@ function get_duration_in_seconds() {
     fi
 }
 
+
+# Converts seconds to human readable format
+# Usage: get_readable_duration <seconds>
+# seconds: e.g. 86400, 3600, 60, 1
+# Returns duration in human readable format
 function get_readable_duration() {
     local total_seconds="$1"
     local days=$((total_seconds / 86400))
@@ -338,10 +408,21 @@ function get_readable_duration() {
     echo "$readable_duration"
 }
 
+
+# Converts ISO-8601 date to epoch
+# Usage: iso_to_epoch <iso_date>
+# iso_date: e.g. 2019-10-15T13:00:00+02:00
+# Returns epoch time
 function iso_to_epoch() {
     date --date="$1" +%s
 }
 
+
+# Filters commits based on regex
+# Usage: filter_commits <regex> <url_type> <duration_seconds>
+# regex: e.g. A_File\.txt
+# url_type: 0 for GitHub, 1 for GitLab
+# duration_seconds: e.g. 86400, 3600, 60, 1
 function filter_commits() {
     local regex="$1"
     local url_type="$2"
