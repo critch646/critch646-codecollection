@@ -1,6 +1,6 @@
 *** Settings ***
 Metadata    Author    Zeke Critchlow
-Documentation    This is a a git history inspection tool
+Documentation    This is a git history inspection tool
 Force Tags    Git    History    Inspection    Tool
 Library    RW.Core
 Library    RW.CLI
@@ -23,13 +23,13 @@ Suite Initialization
     ${REGEX_PATTERN}=    RW.Core.Import User Variable    REGEX_PATTERN
     ...    type=string
     ...    description=Filename to find in the git history
-    ...    pattern=*
+    ...    pattern=\w*
     ...    example=README.md
 
     ${INSPECTION_DURATION}=    RW.Core.Import User Variable    INSPECTION_DURATION
     ...    type=string
     ...    description=Time to wait after executing the script
-    ...    pattern=*
+    ...    pattern=\w*
     ...    example=1d3h15m
 
     Set Suite Variable    ${URL}    ${URL}
