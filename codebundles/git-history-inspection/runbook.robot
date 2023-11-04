@@ -14,6 +14,17 @@ ${BASH_SCRIPT}    ./git-history-inspection.sh
 
 *** Keywords ***
 Suite Initialization
+    ${GITLAB_TOKEN}=    RW.Core.Import Secret
+    ...    GITLAB_TOKEN
+    ...    type=string
+    ...    pattern=\w*
+
+    ${GITHUB_TOKEN}=    RW.Core.Import Secret
+    ...    GITHUB_TOKEN
+    ...    type=string
+    ...    pattern=\w*
+    
+
     ${URL}=    RW.Core.Import User Variable    URL
     ...    type=string
     ...    description=The URL to inspect
@@ -42,7 +53,9 @@ Inspect Git Repository
     [Tags]    info git history inspection
     ${result}=   RW.CLI.Run Bash File 
     ...    bash_file=git-history-inspection.sh 
-    ...    cmd_args=${BASH_SCRIPT} ${URL} ${REGEX_PATTERN} ${INSPECTION_DURATION}
+    ...    cmd_args=${BASH_SCRIPT} ${URL} ${REGEX_PATTERN} ${INSPECTION_DURATION} 
+    ...    secret__GITLAB_TOKEN=${GITLAB_TOKEN} 
+    ...    secret__GITHUB_TOKEN=${GITHUB_TOKEN}
     RW.Core.Add Pre To Report    ${result}
     
     
