@@ -40,7 +40,9 @@ Suite Initialization
 Inspect Git Repository
     [Documentation]    Inspect the git history of a GitHub or GitLab URL
     [Tags]    info git history inspection
-    ${result}=   RW.CLI.Run Bash File bash_file=git-history-inspection.sh cmd_args= ${BASH_SCRIPT} ${URL} ${REGEX_PATTERN} ${INSPECTION_DURATION}
+    ${result}=   RW.CLI.Run Bash File 
+    ...    bash_file=git-history-inspection.sh 
+    ...    cmd_args=${BASH_SCRIPT} ${URL} ${REGEX_PATTERN} ${INSPECTION_DURATION}
     RW.Core.Add Pre To Report    ${result}
     
     
